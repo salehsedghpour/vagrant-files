@@ -1,70 +1,90 @@
-# -*- mode: ruby -*-
-# vi: set ft=ruby :
-
 # All Vagrant configuration is done below. The "2" in Vagrant.configure
 # configures the configuration version (we support older styles for
 # backwards compatibility). Please don't change it unless you know what
 # you're doing.
-Vagrant.configure("2") do |config|
-  # The most common configuration options are documented and commented below.
-  # For a complete reference, please see the online documentation at
-  # https://docs.vagrantup.com.
+VAGRANTFILE_API_VERSION = "2"
 
-  # Every Vagrant development environment requires a box. You can search for
-  # boxes at https://vagrantcloud.com/search.
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # Number of worker nodes to provision
+  NB_WORKERS = default_i('NB_WORKERS', 2)
+  BIND_PROXY = default_b('BIND_PROXY', true)
+  # Memory and CPU for the VMs (2GB, 2Core)
+  MEMORY = default_i('MEMORY', 2048)
+  CPU = default_i('CPU', 2)
+end
+
+# Convenience methods
+def default_s(key, default)
+  ENV[key] && ! ENV[key].empty? ? ENV[key] : default
+end
+def default_i(key, default)
+  default_s(key, default).to_i
+end
+
+def default_b(key, default)
+  default_s(key, default).to_s.downcase == 'true'
+end
+
+def setup_repo (node, vm)
+  vm.provision "shell",
+    path: "scripts/kubeadm-setup-#{node}.sh"
+#    args: ["--no-login"]
+end
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # We start from the Ubuntu 16.04 Xenial
   config.vm.box = "ubuntu/xenial64"
-
-  # Disable automatic box update checking. If you disable this, then
-  # boxes will only be checked for updates when the user runs
-  # `vagrant box outdated`. This is not recommended.
-  # config.vm.box_check_update = false
-
-  # Create a forwarded port mapping which allows access to a specific port
-  # within the machine from a port on the host machine. In the example below,
-  # accessing "localhost:8080" will access port 80 on the guest machine.
-  # NOTE: This will enable public access to the opened port
-  # config.vm.network "forwarded_port", guest: 80, host: 8080
-
-  # Create a forwarded port mapping which allows access to a specific port
-  # within the machine from a port on the host machine and only allow access
-  # via 127.0.0.1 to disable public access
-  # config.vm.network "forwarded_port", guest: 80, host: 8080, host_ip: "127.0.0.1"
-
-  # Create a private network, which allows host-only access to the machine
-  # using a specific IP.
-  # config.vm.network "private_network", ip: "192.168.33.10"
-
-  # Create a public network, which generally matched to bridged network.
-  # Bridged networks make the machine appear as another physical device on
-  # your network.
-  # config.vm.network "public_network"
-
-  # Share an additional folder to the guest VM. The first argument is
-  # the path on the host to the actual folder. The second argument is
-  # the path on the guest to mount the folder. And the optional third
-  # argument is a set of non-required options.
-  # config.vm.synced_folder "../data", "/vagrant_data"
-
   # Provider-specific configuration so you can fine-tune various
   # backing providers for Vagrant. These expose provider-specific options.
-  # Example for VirtualBox:
-  #
-  # config.vm.provider "virtualbox" do |vb|
-  #   # Display the VirtualBox GUI when booting the machine
-  #   vb.gui = true
-  #
-  #   # Customize the amount of memory on the VM:
-  #   vb.memory = "1024"
-  # end
-  #
-  # View the documentation for the provider you are using for more
-  # information on available options.
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = MEMORY
+    vb.cpus = CPU
+  end
 
-  # Enable provisioning with a shell script. Additional provisioners such as
-  # Puppet, Chef, Ansible, Salt, and Docker are also available. Please see the
-  # documentation for more information about their specific syntax and use.
-  # config.vm.provision "shell", inline: <<-SHELL
-  #   apt-get update
-  #   apt-get install -y apache2
-  # SHELL
+  # Define VMs:
+  # - Manager
+  config.vm.define "master", primary: true do |master|
+    master.vm.hostname = "master.vagrant.vm"
+    master.vm.network "private_network", ip: "192.168.99.100"
+    if BIND_PROXY
+      # Bind kubernetes default proxy port
+      master.vm.network "forwarded_port", guest: 8001, host: 8001
+      master.vm.provision :shell, inline: <<-SHELL
+        mkdir -p /etc/systemd/system/kubectl-proxy.service.d/
+        touch /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
+	sed -i 's/"KUBECTL_PROXY_ARGS=.*"/"KUBECTL_PROXY_ARGS=--port 8001 --accept-hosts='.*' --address=0.0.0.0"/' /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
+	systemctl daemon-reload
+        #curl -o kube-flannel.yml https://raw.githubusercontent.com/coreos/flannel/2140ac876ef134e0ed5af15c65e414cf26827915/Documentation/kube-flannel.yml
+       # sed -i.bak 's|"/opt/bin/flanneld",|"/opt/bin/flanneld", "--iface=enp0s8",|' kube-flannel.yml
+       # kubectl apply -f kube-flannel.yml
+	#service restart kubectl
+	#sudo systemctl daemon-reload
+        #sudo systemctl restart kubelet
+      SHELL
+    end
+    # Save options needed for master setup
+ #   master.vm.provision :shell, inline: <<-SHELL
+ #     > /root/.kubeadm-options
+ #   SHELL
+    # kubeadm will use the first network interface, which is the NAT interface
+    # on VirtualBox and is not routable -- See OraBug 26540925
+#    master.vm.provision :shell, inline: <<-SHELL
+#      echo -n " --apiserver-advertise-address 192.168.99.100" >> /root/.kubeadm-options
+#      sed -i 's/\\(- --kube-subnet-mgr\\)/\\1\\n        - --iface=eth1/' /usr/local/share/kubeadm/flannel.yaml
+#    SHELL
+    setup_repo("master", master.vm)
+  end
+  # - Workers
+  (1..NB_WORKERS).each do |i|
+    config.vm.define "worker#{i}" do |worker|
+      worker.vm.hostname = "worker#{i}.vagrant.vm"
+      ip = 100 + i
+      worker.vm.network "private_network", ip: "192.168.99.#{ip}"
+      if Vagrant.has_plugin?("vagrant-hosts")
+        worker.vm.provision :hosts, :sync_hosts => true
+      end
+      setup_repo("worker", worker.vm)
+    end
+  end
+  config.vm.provision "shell",
+    path: "scripts/inst_proc.sh"
 end
