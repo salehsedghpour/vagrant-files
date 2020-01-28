@@ -13,6 +13,6 @@ In order to first installation of Virtual Box and Vagrant, just run the command 
 ## Setup kubernetes
 In order to create a Kubernetes cluster with 1 master and 2 workers, just run the command below:
 
-   cd kubernetes
-   vagrant up
+    cd kubernetes
+    vagrant up
 **Details:** for more details please read [this](https://github.com/salehsedghpour/vagrant-files/tree/master/kubernetes)
