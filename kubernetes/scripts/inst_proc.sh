@@ -1,6 +1,6 @@
 #!/bin/bash
-echo "$USER"
-
+# We usually turn off swap to get better performance according to
+# official kubernetes document
 sudo swapoff -a
 echo "[Info] Swap is disabled - there is an official recommendation from kubernetes"
 echo "Installing and configuring Docker Engine"
@@ -55,7 +55,7 @@ systemctl restart docker
 
 
 echo "Installing and configuring Kubernetes packages"
-
+# Setup kubernetes
 sudo apt-get update && sudo apt-get install -y apt-transport-https curl
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list

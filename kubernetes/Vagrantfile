@@ -1,7 +1,4 @@
-# All Vagrant configuration is done below. The "2" in Vagrant.configure
-# configures the configuration version (we support older styles for
-# backwards compatibility). Please don't change it unless you know what
-# you're doing.
+# Version of Vagrant API
 VAGRANTFILE_API_VERSION = "2"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
@@ -28,8 +25,9 @@ end
 def setup_repo (node, vm)
   vm.provision "shell",
     path: "scripts/kubeadm-setup-#{node}.sh"
-#    args: ["--no-login"]
 end
+
+
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # We start from the Ubuntu 16.04 Xenial
   config.vm.box = "ubuntu/xenial64"
@@ -53,26 +51,13 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         touch /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
 	sed -i 's/"KUBECTL_PROXY_ARGS=.*"/"KUBECTL_PROXY_ARGS=--port 8001 --accept-hosts='.*' --address=0.0.0.0"/' /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
 	systemctl daemon-reload
-        #curl -o kube-flannel.yml https://raw.githubusercontent.com/coreos/flannel/2140ac876ef134e0ed5af15c65e414cf26827915/Documentation/kube-flannel.yml
-       # sed -i.bak 's|"/opt/bin/flanneld",|"/opt/bin/flanneld", "--iface=enp0s8",|' kube-flannel.yml
-       # kubectl apply -f kube-flannel.yml
-	#service restart kubectl
-	#sudo systemctl daemon-reload
-        #sudo systemctl restart kubelet
       SHELL
     end
-    # Save options needed for master setup
- #   master.vm.provision :shell, inline: <<-SHELL
- #     > /root/.kubeadm-options
- #   SHELL
-    # kubeadm will use the first network interface, which is the NAT interface
-    # on VirtualBox and is not routable -- See OraBug 26540925
-#    master.vm.provision :shell, inline: <<-SHELL
-#      echo -n " --apiserver-advertise-address 192.168.99.100" >> /root/.kubeadm-options
-#      sed -i 's/\\(- --kube-subnet-mgr\\)/\\1\\n        - --iface=eth1/' /usr/local/share/kubeadm/flannel.yaml
-#    SHELL
+    # Setup master node using master script in scripts directory,
+    # this will initialize kubernetes cluster and also creat join command
     setup_repo("master", master.vm)
   end
+
   # - Workers
   (1..NB_WORKERS).each do |i|
     config.vm.define "worker#{i}" do |worker|
@@ -82,9 +67,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       if Vagrant.has_plugin?("vagrant-hosts")
         worker.vm.provision :hosts, :sync_hosts => true
       end
+      # Setup worker node using worker script in scripts directory,
+      # this will initialize and join worker node to kubernetes cluster
       setup_repo("worker", worker.vm)
     end
   end
+  # this will install docker and kubeadm,kubectl, kubelet
   config.vm.provision "shell",
     path: "scripts/inst_proc.sh"
 end
