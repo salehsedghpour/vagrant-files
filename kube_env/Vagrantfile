@@ -1,0 +1,55 @@
+# Version of Vagrant API
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # Number of worker nodes to provision
+  NB_WORKERS = default_i('NB_WORKERS', 2)
+  # Memory and CPU for the VMs (2GB, 2Core)
+  MEMORY = default_i('MEMORY', 4096)
+  CPU = default_i('CPU', 2)
+end
+
+# Convenience methods
+def default_s(key, default)
+  ENV[key] && ! ENV[key].empty? ? ENV[key] : default
+end
+def default_i(key, default)
+  default_s(key, default).to_i
+end
+
+def default_b(key, default)
+  default_s(key, default).to_s.downcase == 'true'
+end
+
+def setup_repo (node, vm)
+  vm.provision "shell",
+    path: "scripts/kubeadm-setup-#{node}.sh"
+end
+
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # We start from the Ubuntu 16.04 Xenial
+  config.vm.box = "ubuntu/bionic64"
+  # Provider-specific configuration so you can fine-tune various
+  # backing providers for Vagrant. These expose provider-specific options.
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = MEMORY
+    vb.cpus = CPU
+  end
+
+  # Define VMs:
+  # - Manager
+  config.vm.define "master", primary: true do |master|
+    master.vm.hostname = "master.vagrant.vm"
+    master.vm.network "private_network", ip: "192.168.99.100"
+  end
+
+  # - Workers
+  (1..NB_WORKERS).each do |i|
+    config.vm.define "worker#{i}" do |worker|
+      worker.vm.hostname = "worker#{i}.vagrant.vm"
+      ip = 100 + i
+      worker.vm.network "private_network", ip: "192.168.99.#{ip}"
+    end
+  end
+end
